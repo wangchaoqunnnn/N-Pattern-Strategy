@@ -1,6 +1,12 @@
 /* N字战法 交易系统 Web 前端 —— 无外部依赖, 全部使用同源相对路径 /api/* */
 "use strict";
 
+/* 子路径部署支持: 以当前脚本地址推导站点前缀(如部署在 /N/ 下则为 /N, 根目录部署则为空),
+   之后所有 /api/* 请求自动带上前缀, 由 nginx location ^~ /N/ 转发到后端。 */
+const _scriptSrc = (document.currentScript && document.currentScript.src) || "";
+const APP_BASE = _scriptSrc ? _scriptSrc.replace(/\/app\.js(\?.*)?(#.*)?$/, "") : "";
+const apiUrl = (path) => APP_BASE + path;
+
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
@@ -9,7 +15,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 async function api(path, opts = {}) {
   const cfg = { headers: { "Content-Type": "application/json" }, ...opts };
   if (cfg.body && typeof cfg.body !== "string") cfg.body = JSON.stringify(cfg.body);
-  const r = await fetch(path, cfg);
+  const r = await fetch(apiUrl(path), cfg);
   const text = await r.text();              // 兼容各种响应体, 失败时能给出真实状态与内容
   let j = null;
   try { j = text ? JSON.parse(text) : null; } catch (e) { j = null; }

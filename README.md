@@ -107,6 +107,25 @@ systemctl status nstrategy
 
 `deploy.sh` 全部使用脚本自身相对定位与变量，无硬编码路径；默认安装目录 `/root/NPatternStrategy`（可用 `INSTALL_DIR=... bash deploy/deploy.sh` 覆盖）。
 
+### 通过 nginx 子路径对外（与其它项目共存，如 /N/）
+
+前端已内置**子路径自动识别**：只要把整站挂在任意前缀下，`/api/*` 请求会自动带上前缀，无需改代码。nginx 只需在既有 server 块中加：
+
+```nginx
+location ^~ /N/ {
+    proxy_pass http://127.0.0.1:8000/;   # 尾随 / 会将 /N/api/x 转发为 /api/x
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_http_version 1.1;
+}
+location = /N { return 301 /N/; }
+```
+
+- 不要用 `server_name _` 与其它项目抢流量；多项目按域名(server_name)或多IP(listen IP:80)区分，或用独立端口。
+- 若希望后端仅本机可访问，可将 systemd 服务环境变量改为 `NSTRAT_HOST=127.0.0.1`。
+- 完整示例见 `deploy/nginx.example.conf`（A域名/B多IP/C独立端口三种写法）。
+
 ## 八、自动运行时间表（北京时间）
 
 | 时间 | 动作 |
