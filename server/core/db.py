@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS pool (
     ref_price REAL,
     zone_low REAL,
     zone_high REAL,
+    signal_ts TEXT,
     status TEXT DEFAULT 'in',  -- in | out
     created_at TEXT,
     updated_at TEXT,
@@ -152,7 +153,8 @@ def init_db() -> None:
     # 兼容旧库: 补列
     ensure_columns("pool", {
         "signal_date": "TEXT", "ignite_date": "TEXT", "pull_days": "INTEGER",
-        "ref_price": "REAL", "zone_low": "REAL", "zone_high": "REAL"})
+        "ref_price": "REAL", "zone_low": "REAL", "zone_high": "REAL",
+        "signal_ts": "TEXT"})
     log.info("数据库初始化完成: %s", DB_PATH)
 
 

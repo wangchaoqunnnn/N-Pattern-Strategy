@@ -30,23 +30,27 @@ def upsert_auto(sig: dict) -> bool:
               f"(点火{sig.get('ignite_date')}涨{sig.get('ignite_pct'):+.2f}%, "
               f"回调{sig.get('pull_days')}天, 信号日{sig.get('date')})")
     if exist:
+        # 信号时间=该信号首次检出时刻; 仅当信号类型变化(如watch→b1)时视为新信号而更新
+        sig_ts = exist.get("signal_ts") or now
+        if str(exist.get("signal") or "") != str(sig.get("kind")):
+            sig_ts = now
         db.execute(
             "UPDATE pool SET name=?, board=?, source='auto', signal=?, stage=?, matched=?, "
             "reason=?, signal_date=?, ignite_date=?, pull_days=?, ref_price=?, zone_low=?, "
-            "zone_high=?, updated_at=?, removed_at=NULL, removed_reason=NULL WHERE id=?",
+            "zone_high=?, signal_ts=?, updated_at=?, removed_at=NULL, removed_reason=NULL WHERE id=?",
             (sig.get("name", ""), board, sig.get("kind"), stage_of(sig),
              _json(sig.get("matched") or []), reason, sig.get("date"),
              sig.get("ignite_date"), sig.get("pull_days"), sig.get("ref_price"),
-             sig.get("zone_low"), sig.get("zone_high"), now, exist["id"]))
+             sig.get("zone_low"), sig.get("zone_high"), sig_ts, now, exist["id"]))
         return False
     db.execute(
         "INSERT INTO pool(code,name,board,source,signal,stage,matched,reason,signal_date,"
-        "ignite_date,pull_days,ref_price,zone_low,zone_high,status,created_at,updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'in',?,?)",
+        "ignite_date,pull_days,ref_price,zone_low,zone_high,signal_ts,status,created_at,updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'in',?,?)",
         (sig["code"], sig.get("name", ""), board, "auto", sig.get("kind"),
          stage_of(sig), _json(sig.get("matched") or []), reason, sig.get("date"),
          sig.get("ignite_date"), sig.get("pull_days"), sig.get("ref_price"),
-         sig.get("zone_low"), sig.get("zone_high"), now, now))
+         sig.get("zone_low"), sig.get("zone_high"), now, now, now))
     db.log_event("INFO", f"自动入池: {sig.get('code')} {sig.get('name')} {stage_of(sig)}")
     return True
 

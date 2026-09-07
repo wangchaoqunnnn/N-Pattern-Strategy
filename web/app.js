@@ -184,7 +184,7 @@ function renderPool() {
   let rows = poolData;
   if (f) rows = rows.filter((r) => (f === "manual" ? r.source === "manual" : r.signal === f));
   $("#pool-tip").textContent = `当前 ${rows.length} 只(信号类为系统实时自动筛选; 点击代码查看K线与信号明细)`;
-  const head = [["代码", "l"], ["名称", "l"], ["板块"], ["现价"], ["涨跌额"], ["涨跌幅"], ["来源"], ["信号"], ["阶段", "l"], ["信号日"], ["点火日"], ["回调(天)"], ["参考买价"], ["状态"], ["操作"]];
+  const head = [["代码", "l"], ["名称", "l"], ["板块"], ["现价"], ["涨跌额"], ["涨跌幅"], ["来源"], ["信号"], ["阶段", "l"], ["信号时间"], ["点火日"], ["回调(天)"], ["参考买价"], ["状态"], ["操作"]];
   const body = rows.map((r) => [
     `<a class="lnk" data-code="${esc(r.code)}" href="javascript:void(0)">${esc(r.code)}</a>`,
     `<span class="${updown(r.pct_chg)}">${esc(r.name)}</span>`,
@@ -195,7 +195,7 @@ function renderPool() {
     r.source === "manual" ? '<span class="tag manual">人工</span>' : '<span class="tag auto">自动</span>',
     KIND_TAG[r.signal] || "—",
     esc(r.stage || ""),
-    esc(r.signal_date || ""),
+    esc(r.signal_ts ? String(r.signal_ts).slice(0, 16) : (r.signal_date || "—")),
     esc(r.ignite_date || ""),
     r.pull_days != null ? r.pull_days : "—",
     nm(r.ref_price ?? 0, 3),
