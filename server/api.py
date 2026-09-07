@@ -46,6 +46,48 @@ def health():
     return _ok({"ts": now_str(), "status": "running"})
 
 
+@api.get("/diag")
+def diag():
+    """服务器自检: 环境/数据源连通性/最近错误(排查"响应解析失败"类问题)。"""
+    import platform
+    import sys
+    from .core import providers as P
+    from .core.util import hhmm_now, trading_clock_state
+    tests = {}
+    for name, build in (
+        ("sina_quote", lambda b: P.http_get_text(b + "sh600519",
+                                                 headers={"Referer": "https://finance.sina.com.cn"},
+                                                 charset="gbk", timeout=8, retries=1)),
+        ("tencent_kline", lambda b: P.http_get_text(b + "?param=sh000001,day,2026-09-01,2026-09-07,5,",
+                                                    timeout=8, retries=1)),
+        ("sina_universe", lambda b: P.http_get_text(b + "?page=1&num=3&sort=symbol&asc=1&node=hs_a"
+                                                    "&symbol=&_s_r_a=init", timeout=8, retries=1)),
+    ):
+        cfg = P._prov(name)
+        base = cfg.get("base", "")
+        ok, detail = False, ""
+        try:
+            txt = build(base)
+            ok = bool(txt and len(txt) > 20)
+            detail = txt[:40].replace("\n", " ")
+        except Exception as e:  # noqa: BLE001
+            detail = str(e)[:140]
+        tests[name] = {"reachable": ok, "detail": detail}
+    errs = db.rows("SELECT ts,level,msg FROM engine_log WHERE level IN ('ERROR','WARN') "
+                   "ORDER BY id DESC LIMIT 12")
+    return _ok({
+        "server_time": now_str(),
+        "clock": trading_clock_state(),
+        "platform": platform.platform(),
+        "python": sys.version.split()[0],
+        "engine_enabled": svc.engine_on(),
+        "bootstrap_done": svc.bootstrap_done,
+        "universe_count": db.scalar("SELECT COUNT(*) FROM universe", (), 0) or 0,
+        "provider": tests,
+        "recent_errors": errs,
+    })
+
+
 @api.get("/meta")
 def meta():
     return _ok(svc.status())

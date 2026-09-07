@@ -10,9 +10,14 @@ async function api(path, opts = {}) {
   const cfg = { headers: { "Content-Type": "application/json" }, ...opts };
   if (cfg.body && typeof cfg.body !== "string") cfg.body = JSON.stringify(cfg.body);
   const r = await fetch(path, cfg);
-  let j = {};
-  try { j = await r.json(); } catch (e) { j = { ok: false, error: "响应解析失败" }; }
-  if (!r.ok || j.ok === false) throw new Error(j.error || ("HTTP " + r.status));
+  const text = await r.text();              // 兼容各种响应体, 失败时能给出真实状态与内容
+  let j = null;
+  try { j = text ? JSON.parse(text) : null; } catch (e) { j = null; }
+  if (!r.ok || !j || j.ok === false) {
+    const why = (j && j.error) ? j.error
+      : `HTTP ${r.status} ${r.statusText || ""}${text ? " → " + text.slice(0, 200) : ""}`;
+    throw new Error(why);
+  }
   return j;
 }
 

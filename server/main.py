@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import api
@@ -49,3 +49,13 @@ def index_page():
 
 if (WEB_DIR / "index.html").exists():
     app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+
+
+# ---- 全局兜底: 任何未捕获异常都返回 JSON(前端可解析), 避免明文500导致前端"响应解析失败" ----
+@app.exception_handler(Exception)
+async def unhandled_exc(_req: Request, exc: Exception):
+    log.exception("接口异常: %s", exc)
+    msg = str(exc)[:600] or exc.__class__.__name__
+    return JSONResponse(status_code=500,
+                        content={"ok": False, "error": f"服务器内部错误: {msg}",
+                                 "type": exc.__class__.__name__})
