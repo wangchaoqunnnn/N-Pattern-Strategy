@@ -336,9 +336,20 @@ async def engine_close(request: Request):
 
 @api.post("/engine/sync")
 async def engine_sync(request: Request):
-    """手动触发历史K线同步(后台)。"""
+    """一键同步: 先确保全市场股票列表, 再后台增量同步历史K线。"""
+    b = await _body(request)
+    ok_uni = svc.ensure_universe(force=True)
+    if not ok_uni:
+        return _err("股票列表同步失败: 数据源不可达或返回异常(见 /api/diag), 服务会自动重试")
     svc._start_history_sync()
-    return _ok({"running": True})
+    return _ok({"running": True, "universe": True})
+
+
+@api.post("/engine/sync-universe")
+async def engine_sync_universe(request: Request):
+    """仅重试全市场股票列表同步。"""
+    ok = svc.ensure_universe(force=True)
+    return _ok({"ok": ok, "universe_count": db.scalar("SELECT COUNT(*) FROM universe", (), 0) or 0})
 
 
 @api.get("/config")

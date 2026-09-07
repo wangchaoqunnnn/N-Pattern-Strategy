@@ -139,7 +139,13 @@ async function loadDash() {
       ["推荐池/持仓", `${m.pool_count} / ${m.open_positions}`, `全市场 ${m.universe_count} 只`, "flat"],
       ["数据同步", m.bootstrap_done ? "已就绪" : "同步中…", `K线缓存 ${m.bar_codes} 只`, pct >= 100 ? "up" : "flat"],
     ];
-    $("#dash-cards").innerHTML = kpis.map(([k, v, s2, cl]) =>
+    const uniWarn = (m.universe_count || 0) === 0
+      ? `<div class="kpi" style="grid-column:1/-1;border-color:#e6a3a3;background:#fff6f6">
+           <div class="k">⚠️ 股票列表未就绪</div>
+           <div class="v" style="font-size:15px">全市场股票列表(约5500只)尚未抓取成功</div>
+           <div class="s">点击下方【同步历史K线】手动重试, 系统也会每25秒自动重试; 若持续失败请检查服务器到数据源的连通性(/api/diag)</div></div>`
+      : "";
+    $("#dash-cards").innerHTML = uniWarn + kpis.map(([k, v, s2, cl]) =>
       `<div class="kpi"><div class="k">${esc(k)}</div><div class="v ${esc(cl)}">${v}</div><div class="s">${esc(s2)}</div></div>`).join("");
 
     const env = m.env || {};

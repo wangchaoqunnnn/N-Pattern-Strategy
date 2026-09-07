@@ -36,6 +36,8 @@ class Service:
         self.bootstrap_done = False
         self.sync_running = False
         self._lock = threading.Lock()
+        self._uni_lock = threading.Lock()
+        self.last_uni_try = 0.0
         self.last_fast_ts = ""
         self.last_scan_ts = ""
         self.last_scan_count = 0
@@ -44,6 +46,30 @@ class Service:
         self.close_done_today = ""
         self.env_snapshot = {"mode": "full", "reason": "尚未评估"}
         self._stop = False
+
+    # ---------------- 股票列表自愈 ----------------
+    def ensure_universe(self, force: bool = False) -> bool:
+        """确保全市场股票列表存在(为空时自动重试抓取)。返回是否就绪。"""
+        if self.loaded_universe:
+            return True
+        if (db.scalar("SELECT COUNT(*) FROM universe", (), 0) or 0) > 0:
+            self.loaded_universe = True
+            return True
+        with self._uni_lock:
+            now = time.time()
+            if not force and now - self.last_uni_try < 25:
+                return False
+            self.last_uni_try = now
+        try:
+            n = mk.sync_universe()
+            if (n.get("count") or 0) > 0:
+                self.loaded_universe = True
+                db.log_event("INFO", "股票列表就绪")
+                return True
+        except Exception as e:  # noqa: BLE001
+            log.warning("股票列表抓取失败(将自动重试): %s", e)
+            db.log_event("WARN", f"股票列表抓取失败: {e}")
+        return False
 
     # ---------------- 工具 ----------------
     def eff_cfg(self) -> dict:
@@ -146,7 +172,9 @@ class Service:
     def run_full_scan(self, with_buy: bool = True) -> dict:
         """全市场实时行情刷新 + N字扫描 + 池更新 + 尝试买入。"""
         if not self.loaded_universe:
-            return {"ok": False, "reason": "股票列表未就绪"}
+            self.ensure_universe(force=True)   # 手动触发时先重试股票列表
+        if not self.loaded_universe:
+            return {"ok": False, "reason": "股票列表未就绪(抓取失败, 请检查数据源或稍后重试)"}
         # 1 全市场行情
         try:
             mk.market.refresh_spot(None)
@@ -309,6 +337,10 @@ class Service:
                 scan_sec = max(10, self.interval("scan_interval_sec",
                                                  int(self.cfg.get("scan_interval_sec", 60))))
                 has_universe = (db.scalar("SELECT COUNT(*) FROM universe", (), 0) or 0) > 0
+                if not has_universe:
+                    # 股票列表为空 → 自动重试抓取(限频25s), 就绪前暂停市场动作
+                    self.ensure_universe()
+                    has_universe = (db.scalar("SELECT COUNT(*) FROM universe", (), 0) or 0) > 0
                 # 收盘流程: 15:00 后(且今天确为交易日)执行一次
                 if clk["phase"] == "post" and clk["date"] != last_close \
                         and mk.market.is_trading_today():
