@@ -267,6 +267,44 @@ class Service:
                     buys = trader.attempt_buys(fresh, version, params, self.eff_cfg(), env)
         return {"ok": True, "sells": sells, "buys": buys}
 
+    # ---------------- 手动动作(异步提交, 秒回, 避免超时504) ----------------
+    def _run_once(self, name: str, fn, busy_attr: str) -> dict:
+        if getattr(self, busy_attr, False):
+            return {"ok": True, "accepted": True, "busy": True}
+        setattr(self, busy_attr, True)
+
+        def job() -> None:
+            try:
+                fn()
+            except Exception:  # noqa: BLE001
+                log.exception("%s 后台执行异常", name)
+            finally:
+                setattr(self, busy_attr, False)
+
+        threading.Thread(target=job, daemon=True, name=name).start()
+        return {"ok": True, "accepted": True, "busy": False}
+
+    def kick_scan(self) -> dict:
+        self._scan_busy = getattr(self, "_scan_busy", False)
+        return self._run_once("kick-scan",
+                              lambda: self.run_full_scan(with_buy=True), "_scan_busy")
+
+    def kick_sync(self) -> dict:
+        self._sync_busy = getattr(self, "_sync_busy", False)
+        return self._run_once("kick-sync",
+                              lambda: (self.ensure_universe(force=True),
+                                       self._start_history_sync()), "_sync_busy")
+
+    def kick_close(self) -> dict:
+        self._close_busy = getattr(self, "_close_busy", False)
+        return self._run_once("kick-close",
+                              lambda: self.close_pass(), "_close_busy")
+
+    def kick_universe(self) -> dict:
+        self._uni_busy = getattr(self, "_uni_busy", False)
+        return self._run_once("kick-universe",
+                              lambda: self.ensure_universe(force=True), "_uni_busy")
+
     # ---------------- 收盘任务链 ----------------
     def close_pass(self, date: str = "") -> dict:
         date = date or today_str()

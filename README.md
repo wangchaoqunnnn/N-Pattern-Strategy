@@ -118,6 +118,9 @@ location ^~ /N/ {
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_http_version 1.1;
+    proxy_connect_timeout 10s;
+    proxy_read_timeout 300s;             # 全市场扫描/同步等重活耗时较长, 避免504
+    proxy_send_timeout 300s;
 }
 location = /N { return 301 /N/; }
 ```

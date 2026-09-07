@@ -161,9 +161,9 @@ async function loadDash() {
          <button class="btn primary" id="btn-scan">立即扫描</button>
          <button class="btn" id="btn-close">收盘复盘</button>
          <button class="btn" id="btn-sync">同步历史K线</button></p>`;
-    $("#btn-scan").onclick = async () => { try { const r = await api("/api/engine/scan", { method: "POST", body: {} }); toast(`扫描完成: 信号${r.data.signals || r.signals || 0}个`); } catch (e) { toast(e.message, 1); } };
-    $("#btn-close").onclick = async () => { try { const r = await api("/api/engine/close", { method: "POST", body: {} }); toast("收盘流程已执行"); loadStats(); } catch (e) { toast(e.message, 1); } };
-    $("#btn-sync").onclick = async () => { try { await api("/api/engine/sync", { method: "POST", body: {} }); toast("历史同步任务已启动"); } catch (e) { toast(e.message, 1); } };
+    $("#btn-scan").onclick = async () => { try { await api("/api/engine/scan", { method: "POST", body: {} }); toast("扫描任务已提交(异步), 稍候查看仪表盘/推荐池"); setTimeout(loadDash, 3000); } catch (e) { toast(e.message, 1); } };
+    $("#btn-close").onclick = async () => { try { await api("/api/engine/close", { method: "POST", body: {} }); toast("收盘复盘任务已提交(异步)"); setTimeout(loadDash, 3000); } catch (e) { toast(e.message, 1); } };
+    $("#btn-sync").onclick = async () => { try { await api("/api/engine/sync", { method: "POST", body: {} }); toast("同步任务已提交(异步), 列表+K线将在后台进行"); setTimeout(loadDash, 3000); } catch (e) { toast(e.message, 1); } };
     const logs = (await api("/api/logs?limit=60")).data;
     $("#dash-logs").innerHTML = logs.map((l) =>
       `<div>${esc(l.ts)} [${esc(l.level)}] ${esc(l.msg)}</div>`).join("") || '<div class="muted">暂无</div>';

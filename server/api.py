@@ -323,33 +323,30 @@ async def engine_toggle(request: Request):
 
 @api.post("/engine/scan")
 async def engine_scan(request: Request):
-    r = svc.run_full_scan(with_buy=False)
-    return _ok(r) if r.get("ok") else _err(r.get("reason", "扫描失败"))
+    """立即扫描(异步提交, 秒回; 结果看仪表盘 最近扫描/信号数)。"""
+    return _ok(svc.kick_scan())
 
 
 @api.post("/engine/close")
 async def engine_close(request: Request):
+    """收盘复盘流程(异步提交)。"""
     b = await _body(request)
-    date = b.get("date") or today_str()
-    return _ok(svc.close_pass(date))
+    if b.get("date"):
+        from .core.util import parse_date
+        return _err("手动指定日期的收盘流程仅限同步接口, 请不带date提交(系统自动按当日)")
+    return _ok(svc.kick_close())
 
 
 @api.post("/engine/sync")
 async def engine_sync(request: Request):
-    """一键同步: 先确保全市场股票列表, 再后台增量同步历史K线。"""
-    b = await _body(request)
-    ok_uni = svc.ensure_universe(force=True)
-    if not ok_uni:
-        return _err("股票列表同步失败: 数据源不可达或返回异常(见 /api/diag), 服务会自动重试")
-    svc._start_history_sync()
-    return _ok({"running": True, "universe": True})
+    """一键同步(异步): 先确保全市场股票列表, 再后台增量同步历史K线。"""
+    return _ok(svc.kick_sync())
 
 
 @api.post("/engine/sync-universe")
 async def engine_sync_universe(request: Request):
-    """仅重试全市场股票列表同步。"""
-    ok = svc.ensure_universe(force=True)
-    return _ok({"ok": ok, "universe_count": db.scalar("SELECT COUNT(*) FROM universe", (), 0) or 0})
+    """仅重试全市场股票列表同步(异步)。"""
+    return _ok(svc.kick_universe())
 
 
 @api.get("/config")
