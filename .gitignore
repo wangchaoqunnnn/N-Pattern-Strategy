@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# 运行时数据/日志(部署/运行自动生成)
+data/
+server/config.json
+
+# 系统文件
+.DS_Store
+Thumbs.db
+*.log

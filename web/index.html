@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N字战法 · 自动选股与自我执行交易系统</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header id="topbar">
+  <div class="brand">N字战法<span>自动选股 · 自我执行交易系统</span></div>
+  <nav id="nav">
+    <button data-tab="dash" class="active">仪表盘</button>
+    <button data-tab="pool">推荐买入池</button>
+    <button data-tab="trades">交易系统买卖池</button>
+    <button data-tab="strategy">交易系统</button>
+    <button data-tab="stats">复盘统计</button>
+    <button data-tab="backtest">回测</button>
+    <button data-tab="settings">设置/日志</button>
+  </nav>
+  <div id="hstatus"></div>
+</header>
+
+<main>
+  <!-- ============ 仪表盘 ============ -->
+  <section id="tab-dash" class="tab active">
+    <div class="cards" id="dash-cards"></div>
+    <div class="cols">
+      <div class="card"><div class="card-h">大盘环境闸门 / 最近信号</div>
+        <div id="dash-env" class="pad"></div></div>
+      <div class="card"><div class="card-h">运行日志(最近)</div>
+        <div id="dash-logs" class="pad mono"></div></div>
+    </div>
+  </section>
+
+  <!-- ============ 推荐买入池 ============ -->
+  <section id="tab-pool" class="tab">
+    <div class="toolbar">
+      <input id="pool-search" placeholder="输入代码/名称搜索全市场..." >
+      <button id="pool-add">手动加入推荐池</button>
+      <select id="pool-filter">
+        <option value="">全部信号</option>
+        <option value="b1">买点B1(回踩企稳)</option>
+        <option value="b2">买点B2(放量突破)</option>
+        <option value="watch">观察(回调中)</option>
+        <option value="manual">人工关注</option>
+      </select>
+      <span class="hint" id="pool-tip"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="pool-table" class="grid"></table>
+    </div>
+  </section>
+
+  <!-- ============ 交易系统买卖池 ============ -->
+  <section id="tab-trades" class="tab">
+    <div class="toolbar">
+      <button data-sub="open" class="subbtn active">当前持仓</button>
+      <button data-sub="closed" class="subbtn">历史平仓</button>
+      <button data-sub="exec" class="subbtn">买卖操作流水</button>
+    </div>
+    <div id="sub-open" class="subview"></div>
+    <div id="sub-closed" class="subview" style="display:none"></div>
+    <div id="sub-exec" class="subview" style="display:none"></div>
+  </section>
+
+  <!-- ============ 交易系统 ============ -->
+  <section id="tab-strategy" class="tab">
+    <div class="cols">
+      <div class="card" style="flex:1"><div class="card-h">当前执行版本</div>
+        <div id="str-current" class="pad"></div></div>
+      <div class="card" style="flex:1"><div class="card-h">规则5触发监测(连续5日)</div>
+        <div id="str-rule5" class="pad"></div></div>
+    </div>
+    <div class="card"><div class="card-h">版本历史(可任选执行)</div>
+      <div id="str-versions"></div></div>
+    <div class="card"><div class="card-h">自优化记录</div>
+      <div id="str-opts"></div></div>
+  </section>
+
+  <!-- ============ 复盘统计 ============ -->
+  <section id="tab-stats" class="tab">
+    <div class="cards" id="stats-cards"></div>
+    <div class="card"><div class="card-h">已实现权益曲线</div>
+      <canvas id="eq-canvas" class="chart"></canvas></div>
+    <div class="cols">
+      <div class="card" style="flex:1"><div class="card-h">月度统计</div>
+        <div id="monthly-table"></div></div>
+      <div class="card" style="flex:1"><div class="card-h">复盘记录</div>
+        <div id="reviews-list"></div></div>
+    </div>
+  </section>
+
+  <!-- ============ 回测 ============ -->
+  <section id="tab-backtest" class="tab">
+    <div class="card">
+      <div class="card-h">历史回测(与实盘同一套规则; 可选任一历史版本)</div>
+      <div class="form-row">
+        <label>开始 <input id="bt-start" type="date"></label>
+        <label>结束 <input id="bt-end" type="date"></label>
+        <label>版本 <select id="bt-ver"></select></label>
+        <label>资金 <input id="bt-cap" type="number" value="1000000"></label>
+        <button id="bt-run" class="primary">开始回测</button>
+      </div>
+      <p class="hint">说明: 回测以日K收盘价+滑点撮合, 需该区间历史K线已在本地(不足会自动联网补齐);
+        结果仅供研究复盘, 不代表未来收益。回测区间不宜超过本地数据范围过多。</p>
+    </div>
+    <div class="card"><div class="card-h">回测任务</div><div id="bt-list"></div></div>
+  </section>
+
+  <!-- ============ 设置/日志 ============ -->
+  <section id="tab-settings" class="tab">
+    <div class="card"><div class="card-h">引擎与运行设置</div>
+      <div id="set-panel" class="pad"></div></div>
+    <div class="card"><div class="card-h">完整日志</div>
+      <pre id="full-logs" class="mono logbox"></pre></div>
+  </section>
+</main>
+
+<div id="modal-mask" style="display:none">
+  <div id="modal">
+    <div class="modal-h"><span id="modal-title"></span><button id="modal-close">✕</button></div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

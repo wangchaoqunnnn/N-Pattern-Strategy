@@ -1,0 +1,31 @@
+{
+  "_说明": "外部数据服务地址集中在此配置文件中(非代码)。代码中不得出现静态/绝对地址, 均以此文件为唯一来源; 若某数据源不可用可在云端替换为可达源(如东方财富), 无需改动代码。",
+  "providers": {
+    "sina_quote": {
+      "base": "https://hq.sinajs.cn/list=",
+      "headers": {"Referer": "https://finance.sina.com.cn"},
+      "charset": "gbk",
+      "note": "新浪批量实时行情, 支持一次数百只, 返回GBK文本"
+    },
+    "sina_universe": {
+      "base": "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData",
+      "note": "新浪沪深京A股全量列表(分页JSON)"
+    },
+    "tencent_kline": {
+      "base": "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
+      "note": "腾讯日K(支持不复权day/前复权qfq), 同时返回最新快照qt"
+    },
+    "tencent_quote": {
+      "base": "https://qt.gtimg.cn/q=",
+      "note": "腾讯行情(备用, 单次数量少)"
+    },
+    "sina_kline": {
+      "base": "https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20_=/CN_MarketDataService.getKLineData",
+      "note": "新浪日K回退源(腾讯K线失败时使用), scale=240"
+    },
+    "index_codes": {
+      "sh000300": "沪深300",
+      "sh000001": "上证指数"
+    }
+  }
+}

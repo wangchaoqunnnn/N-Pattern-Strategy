@@ -1,0 +1,24 @@
+{
+  "_说明": "运行时配置。路径均为相对路径或由环境变量覆盖, 不含静态/绝对地址。NSTRAT_HOST / NSTRAT_PORT / NSTRAT_DATA 环境变量可覆盖 host/port/数据目录。首次启动自动复制为 config.json。",
+  "host": "0.0.0.0",
+  "port": 8000,
+  "base_capital": 1000000.0,
+  "data_refresh_sec": 5,
+  "scan_interval_sec": 60,
+  "history_calendar_days": 320,
+  "backtest_concurrency": 8,
+  "engine": {
+    "enabled": true,
+    "buy_start_hhmm": "0935",
+    "buy_end_hhmm": "1445",
+    "sell_end_hhmm": "1455",
+    "max_buys_per_day": 3,
+    "max_positions": 5,
+    "position_pct": 0.2,
+    "per_trade_fee_rate_buy": 0.00025,
+    "per_trade_fee_rate_sell": 0.00075,
+    "slippage_pct": 0.1,
+    "cooldown_days": 10
+  },
+  "strategy_v1_readable": "N字战法v1: 倍量点火阳线+缩量回调(2-6天,不破点火低点,回调均量≤点火量50%)+二次放量突破回调高点 买入; T+1硬约束(当日买入次日方可卖出); -8%硬止损/形态止损(第二阳底部或N型回调低点)/+25%目标分批止盈/高点回撤15%移动止盈; 沪深300环境闸门; 单票≤20%仓位, 同时持仓≤5只。"
+}
