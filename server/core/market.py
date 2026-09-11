@@ -94,13 +94,40 @@ def _row_from_eastmoney(it: dict, now: str):
             float_shares if float_shares > 0 else 0.0, now)
 
 
-def sync_universe(max_items: int = 30000) -> Dict:
-    """全市场股票列表同步。
+def _probe_b_shares(now: str) -> List[tuple]:
+    """B股(沪B 900901-900999 / 深B 200002-200999)代码段探测。
+    新浪行情接口支持B股实时报价, 用它枚举出真实存在的B股, 无需额外列表源。"""
+    sh_codes = [f"9009{i:02d}" for i in range(1, 100)]
+    sz_codes = [f"200{i:03d}" for i in range(2, 1000)]
+    syms = [(c, "sh") for c in sh_codes] + [(c, "sz") for c in sz_codes]
+    try:
+        quotes = P.sina_fetch_spot(syms)
+    except Exception as e:  # noqa: BLE001
+        log.warning("B股探测失败(已跳过): %s", e)
+        return []
+    out = []
+    for code, q in quotes.items():
+        name = str(q.get("name") or "").strip()
+        prev = num(q.get("prev_close"))
+        if not name or prev <= 0:
+            continue                                   # 空代码/无行情 → 非上市B股
+        board = classify(code)
+        if board not in ("沪B", "深B"):
+            continue
+        out.append((code, symbol_of(code), name, board, 0.0, now))
+    if out:
+        log.info("B股探测完成: %s 只(沪B/深B)", len(out))
+    return out
 
-    覆盖全部交易所与板块:
+
+def sync_universe(max_items: int = 30000) -> Dict:
+    """全市场股票列表同步(覆盖全部交易所/板块, 无遗漏)。
+
+    链路:
       1) 新浪 沪深京A股列表(主源) —— 沪主板/深主板/科创板/创业板/北交所;
-      2) 东方财富列表(可选补充源) —— 沪B/深B 等新浪未覆盖的品种;
-      3) 若主源不可用, 自动用东方财富A股列表兜底。
+      2) 东方财富列表(可选) —— B股补充; 不可达时用3)兜底;
+      3) B股代码段探测(新浪行情) —— 不依赖额外列表源即可纳入沪B/深B;
+      4) 主源失败时东方财富A股列表兜底; 全部失败则保留本地缓存继续运行。
     """
     now = now_cn().strftime("%Y-%m-%d %H:%M:%S")
     rows: List[tuple] = []
@@ -109,28 +136,33 @@ def sync_universe(max_items: int = 30000) -> Dict:
     except Exception as e:  # noqa: BLE001
         log.warning("新浪股票列表抓取失败: %s", e)
         items = []
+    sina_rows = []
     for it in items:
         r = _row_from_sina(it, now)
         if r:
-            rows.append(r)
-    # B股补充(沪B/深B) —— 东方财富可达时纳入, 不可达则跳过
+            sina_rows.append(r)
+    rows.extend(sina_rows)
+    # B股补充: 先试东方财富(含流通市值), 不可用则代码段探测
+    b_added = 0
     try:
         p = P._prov("eastmoney_universe")
         fs_b = p.get("fs_b_share") or ""
         if fs_b:
-            b_items = P.eastmoney_fetch_list(fs_b, max_pages=3)
-            added = 0
-            for it in b_items:
+            for it in P.eastmoney_fetch_list(fs_b, max_pages=3):
                 r = _row_from_eastmoney(it, now)
                 if r:
                     rows.append(r)
-                    added += 1
-            if added:
-                log.info("B股补充完成: %s 只(沪B/深B)", added)
+                    b_added += 1
+            if b_added:
+                log.info("B股补充完成(东方财富): %s 只", b_added)
     except Exception as e:  # noqa: BLE001
-        log.info("B股补充源不可用(已跳过, 不影响A股全覆盖): %s", e)
+        log.info("东方财富B股源不可用, 改用代码段探测: %s", e)
+    if b_added == 0:
+        probed = _probe_b_shares(now)
+        rows.extend(probed)
+        b_added = len(probed)
     # A股兜底: 主源失败时用东方财富
-    if not rows:
+    if not sina_rows:
         try:
             p = P._prov("eastmoney_universe")
             a_items = P.eastmoney_fetch_list(p.get("fs_a_share") or "", max_pages=40)
@@ -138,8 +170,8 @@ def sync_universe(max_items: int = 30000) -> Dict:
                 r = _row_from_eastmoney(it, now)
                 if r:
                     rows.append(r)
-            if rows:
-                log.info("已使用东方财富列表兜底: %s 只", len(rows))
+            if a_items:
+                log.info("已使用东方财富列表兜底: %s 条", len(a_items))
         except Exception as e:  # noqa: BLE001
             log.warning("A股列表兜底源亦不可用: %s", e)
     # 去重(后写覆盖)
@@ -157,8 +189,10 @@ def sync_universe(max_items: int = 30000) -> Dict:
         "VALUES(?,?,?,?,?,?) ON CONFLICT(code) DO UPDATE SET "
         "symbol=excluded.symbol,name=excluded.name,board=excluded.board,"
         "float_shares=excluded.float_shares,updated_at=excluded.updated_at", final)
-    log.info("universe 同步完成: %s 只(含北交所/B股等全部交易所)", len(final))
-    return {"count": len(final)}
+    total = db.scalar("SELECT COUNT(*) FROM universe", (), 0) or 0
+    log.info("universe 同步完成: 本次更新 %s 条, 列表合计 %s 只(A股全部交易所 + B股)",
+             len(final), total)
+    return {"count": total, "updated": len(final)}
 
 
 def universe_list() -> List[dict]:
