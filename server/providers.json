@@ -5,7 +5,13 @@
       "base": "https://hq.sinajs.cn/list=",
       "headers": {"Referer": "https://finance.sina.com.cn"},
       "charset": "gbk",
-      "note": "新浪批量实时行情, 支持一次数百只, 返回GBK文本"
+      "note": "新浪批量实时行情(主源); 部分云服务器IP会被新浪返回403, 此时自动切换腾讯行情"
+    },
+    "tencent_spot": {
+      "base": "https://qt.gtimg.cn/q=",
+      "charset": "gbk",
+      "batch_size": 60,
+      "note": "腾讯批量实时行情(备用主源): 沪深/北交所/B股通用, 单次约60只, GBK文本"
     },
     "sina_universe": {
       "base": "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData",

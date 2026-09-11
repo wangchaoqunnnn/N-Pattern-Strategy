@@ -48,26 +48,30 @@ def health():
 
 @api.get("/diag")
 def diag():
-    """服务器自检: 环境/数据源连通性/最近错误(排查"响应解析失败"类问题)。"""
+    """服务器自检: 环境/数据源连通性/最近错误(排查行情缺失、无成交等问题)。"""
     import platform
     import sys
     from .core import providers as P
     from .core.util import hhmm_now, trading_clock_state
     tests = {}
     for name, build in (
-        ("sina_quote", lambda b: P.http_get_text(b + "sh600519",
-                                                 headers={"Referer": "https://finance.sina.com.cn"},
-                                                 charset="gbk", timeout=8, retries=1)),
-        ("tencent_kline", lambda b: P.http_get_text(b + "?param=sh000001,day,2026-09-01,2026-09-07,5,",
-                                                    timeout=8, retries=1)),
-        ("sina_universe", lambda b: P.http_get_text(b + "?page=1&num=3&sort=symbol&asc=1&node=hs_a"
-                                                    "&symbol=&_s_r_a=init", timeout=8, retries=1)),
+        ("sina_quote", lambda b, c: P.http_get_text(
+            b + "sh600519", headers=c.get("headers") or {},
+            charset=c.get("charset", "gbk"), timeout=8, retries=1)),
+        ("tencent_spot", lambda b, c: P.http_get_text(
+            b + "sh600519,sz000001,bj920000", charset=c.get("charset", "gbk"),
+            timeout=8, retries=1)),
+        ("tencent_kline", lambda b, c: P.http_get_text(
+            b + "?param=sh000001,day,2026-09-01,2026-09-07,5,", timeout=8, retries=1)),
+        ("sina_universe", lambda b, c: P.http_get_text(
+            b + "?page=1&num=3&sort=symbol&asc=1&node=hs_a&symbol=&_s_r_a=init",
+            timeout=8, retries=1)),
     ):
         cfg = P._prov(name)
         base = cfg.get("base", "")
         ok, detail = False, ""
         try:
-            txt = build(base)
+            txt = build(base, cfg)
             ok = bool(txt and len(txt) > 20)
             detail = txt[:40].replace("\n", " ")
         except Exception as e:  # noqa: BLE001

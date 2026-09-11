@@ -178,6 +178,64 @@ def _f(x) -> float:
         return 0.0
 
 
+# ================= 腾讯: 批量实时行情(新浪403时的自动切换源) =================
+def tencent_fetch_spot(codes: List[Tuple[str, str]]) -> Dict[str, dict]:
+    """codes: [(code,'sh'/'sz'/'bj')] -> {code: quote}。
+    腾讯行情 q=sh600519,sz000001,... (GBK), 单次约60只, 分块并发。
+    字段(按 ~ 分隔): 3现价 4昨收 5今开 6成交量(手) 30时间 31涨跌 32涨跌% 33最高 34最低 37成交额(万)。"""
+    p = _prov("tencent_spot")
+    base = p.get("base", "")
+    charset = p.get("charset", "gbk")
+    batch = int(p.get("batch_size", 60))
+    if not codes:
+        return {}
+    symbols = [m + c for c, m in codes]
+    chunks = [symbols[i:i + batch] for i in range(0, len(symbols), batch)]
+
+    def fetch(chunk: List[str]) -> Dict[str, dict]:
+        url = base + ",".join(chunk)
+        try:
+            txt = http_get_text(url, charset=charset, timeout=15, retries=2)
+        except Exception as e:  # noqa: BLE001
+            log.warning("腾讯行情chunk失败: %s", e)
+            return {}
+        out: Dict[str, dict] = {}
+        for line in txt.splitlines():
+            line = line.strip()
+            if '="' not in line:
+                continue
+            var, _, body = line.partition("=")
+            sym = var.rsplit("_", 1)[-1].strip()
+            if not sym or sym in ("pv_none_match",):
+                continue
+            f = body.strip().strip('"').strip(";").split("~")
+            if len(f) < 40:
+                continue
+            code = sym[2:] if len(sym) > 2 and sym[:2].isalpha() else sym
+            price = _f(f[3]); prev = _f(f[4]); open_ = _f(f[5])
+            vol_hand = _f(f[6]); high = _f(f[33]); low = _f(f[34])
+            t = str(f[30])
+            ts = (f"{t[0:4]}-{t[4:6]}-{t[6:8]} {t[8:10]}:{t[10:12]}:{t[12:14]}"
+                  if len(t) >= 14 and t.isdigit() else "")
+            if price <= 0:
+                price = prev                       # 停牌/集合竞价前
+            pct = (price - prev) / prev * 100 if prev > 0 else 0.0
+            chg = price - prev if prev > 0 else 0.0
+            out[code] = {"symbol": sym, "code": code, "name": str(f[1]).strip(),
+                         "price": price, "prev_close": prev, "open": open_,
+                         "high": high, "low": low, "pct_chg": pct, "change": chg,
+                         "volume": vol_hand * 100.0,          # 手 -> 股
+                         "amount": _f(f[37]) * 10000.0,       # 万元 -> 元
+                         "ts": ts, "src": "tencent"}
+        return out
+
+    merged: Dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for part in ex.map(fetch, chunks):
+            merged.update(part)
+    return merged
+
+
 # ================= 腾讯: 日K线(不复权 day / 前复权 qfqday) =================
 def _tencent_kline_raw(prov_name: str, symbol: str, start: str, end: str, count: int = 800,
                        fq: str = "") -> Optional[List[List]]:

@@ -309,14 +309,30 @@ class MarketState:
 
     # ---------- 实时行情 ----------
     def refresh_spot(self, codes: Optional[List[str]] = None) -> Dict[str, dict]:
-        """抓取实时行情(新浪批量). codes=None 时取全市场(universe, 含北交所/B股)。
+        """抓取实时行情。codes=None 时取全市场(universe, 含北交所/B股)。
+
+        行情源自动切换: 新浪批量行情 → 若不可用/部分失败(常见: 云服务器IP被新浪403),
+        自动用腾讯行情补齐缺失代码(沪深/北交所/B股通用)。
         采用"合并更新": 抓取失败的代码保留上一次快照, 避免瞬时失败清空内存行情。"""
         if codes is None:
             syms = [(r["code"], (r.get("symbol") or symbol_of(r["code"]))[:2])
                     for r in universe_list()]
         else:
             syms = [(c, self.symbols.get(c, symbol_of(c))[:2]) for c in codes]
-        spot = P.sina_fetch_spot(syms)
+        spot: Dict[str, dict] = {}
+        try:
+            spot = P.sina_fetch_spot(syms)
+        except Exception as e:  # noqa: BLE001
+            log.warning("新浪行情不可用: %s", e)
+        missing = [(c, m) for c, m in syms if c not in spot]
+        if missing:
+            try:
+                extra = P.tencent_fetch_spot(missing)
+                if extra:
+                    spot.update(extra)
+                    log.info("新浪行情缺失 %s 只, 已用腾讯行情补齐 %s 只", len(missing), len(extra))
+            except Exception as e:  # noqa: BLE001
+                log.warning("腾讯行情补齐失败: %s", e)
         now = now_cn().strftime("%Y-%m-%d %H:%M:%S")
         # 清理历史遗留的带前缀键(兼容旧版存储)
         if codes is None:
