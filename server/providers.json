@@ -1,46 +1,68 @@
 {
-  "_说明": "外部数据服务地址集中在此配置文件中(非代码)。代码中不得出现静态/绝对地址, 均以此文件为唯一来源; 若某数据源不可用可在云端替换为可达源(如东方财富), 无需改动代码。",
+  "_说明": "外部数据服务地址集中在此配置文件中(非代码)。代码中不得出现静态/绝对地址, 均以此文件为唯一来源; 某个源不可用时系统按 chains 顺序自动切换, 无需改代码。",
+  "chains": {
+    "quote": ["sina_quote", "tencent_spot", "tencent_spot_alt", "eastmoney_spot"],
+    "kline": ["tencent_kline", "tencent_kline_alt", "eastmoney_kline", "sina_kline"],
+    "universe": ["sina_universe", "eastmoney_universe"]
+  },
   "providers": {
     "sina_quote": {
       "base": "https://hq.sinajs.cn/list=",
       "headers": {"Referer": "https://finance.sina.com.cn"},
       "charset": "gbk",
-      "note": "新浪批量实时行情(主源); 部分云服务器IP会被新浪返回403, 此时自动切换腾讯行情"
+      "note": "行情源1(新浪批量实时行情); 部分云服务器IP会被新浪返回403, 系统自动切换下一源"
     },
     "tencent_spot": {
       "base": "https://qt.gtimg.cn/q=",
       "charset": "gbk",
       "batch_size": 60,
-      "note": "腾讯批量实时行情(备用主源): 沪深/北交所/B股通用, 单次约60只, GBK文本"
+      "note": "行情源2(腾讯批量实时行情): 沪深/北交所/B股通用, 约60只/次, GBK文本"
+    },
+    "tencent_spot_alt": {
+      "base": "https://web.sqt.gtimg.cn/q=",
+      "charset": "gbk",
+      "batch_size": 60,
+      "note": "行情源3(腾讯行情备用域名, 与qt.gtimg.cn同格式, 用于域名级故障冗余)"
+    },
+    "eastmoney_spot": {
+      "base": "https://push2.eastmoney.com/api/qt/ulist.np/get",
+      "params": {"fltt": 2, "invt": 2, "fields": "f12,f14,f2,f3,f4,f5,f6,f15,f16,f17,f18,f124"},
+      "batch_size": 50,
+      "market_map": {"sh": "1", "sz": "0", "bj": "0"},
+      "note": "行情源4(东方财富批量行情): JSON, 覆盖沪深/北交所"
     },
     "sina_universe": {
       "base": "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData",
-      "note": "新浪沪深京A股全量列表(分页JSON)"
-    },
-    "tencent_kline": {
-      "base": "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get",
-      "note": "腾讯日K(主源, 无WAF, 沪深/指数/北交所通用), 支持不复权day/前复权qfq"
-    },
-    "tencent_kline_alt": {
-      "base": "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
-      "note": "腾讯日K备源(对北交所bj代码会返回WAF页, 仅作回退)"
-    },
-    "tencent_quote": {
-      "base": "https://qt.gtimg.cn/q=",
-      "note": "腾讯行情(备用, 单次数量少)"
-    },
-    "sina_kline": {
-      "base": "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData",
-      "headers": {"Referer": "https://finance.sina.com.cn"},
-      "note": "新浪日K最终回退源(支持北交所), scale=240, 返回最近N根JSON数组"
+      "note": "列表源1(新浪沪深京A股全量, 分页JSON)"
     },
     "eastmoney_universe": {
       "base": "https://push2.eastmoney.com/api/qt/clist/get",
-      "note": "东方财富列表接口(可选补充源): 用于纳入B股(沪B/深B)以及在A股列表源不可用时兜底; 服务器不可达时自动跳过",
+      "note": "列表源2(东方财富): B股补充 + A股列表兜底; 不可达时自动跳过",
       "params": {"po": 1, "np": 1, "fltt": 2, "invt": 2, "fid": "f12",
                  "fields": "f12,f14,f2,f20,f21"},
       "fs_b_share": "m:0+b:2,m:1+b:2",
       "fs_a_share": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048"
+    },
+    "tencent_kline": {
+      "base": "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get",
+      "note": "日K源1(腾讯proxy, 无WAF; 沪深/指数/北交所通用), 支持不复权day/前复权qfq"
+    },
+    "tencent_kline_alt": {
+      "base": "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
+      "note": "日K源2(腾讯web; 对北交所bj代码可能返回WAF页)"
+    },
+    "eastmoney_kline": {
+      "base": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+      "params": {"fields1": "f1,f2,f3,f4,f5,f6",
+                 "fields2": "f51,f52,f53,f54,f55,f56,f57",
+                 "klt": 101, "fqt": 0},
+      "market_map": {"sh": "1", "sz": "0", "bj": "0"},
+      "note": "日K源3(东方财富日线, klt=101, fqt=0不复权)"
+    },
+    "sina_kline": {
+      "base": "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData",
+      "headers": {"Referer": "https://finance.sina.com.cn"},
+      "note": "日K源4(新浪money域名, 支持北交所), scale=240, 返回最近N根JSON数组"
     },
     "index_codes": {
       "sh000300": "沪深300",

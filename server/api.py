@@ -61,8 +61,17 @@ def diag():
         ("tencent_spot", lambda b, c: P.http_get_text(
             b + "sh600519,sz000001,bj920000", charset=c.get("charset", "gbk"),
             timeout=8, retries=1)),
+        ("tencent_spot_alt", lambda b, c: P.http_get_text(
+            b + "sh600519,bj920000", charset=c.get("charset", "gbk"),
+            timeout=8, retries=1)),
+        ("eastmoney_spot", lambda b, c: P.http_get_text(
+            b + "?fltt=2&invt=2&fields=f12,f14,f2,f3&secids=1.600519,0.000001",
+            timeout=8, retries=1)),
         ("tencent_kline", lambda b, c: P.http_get_text(
             b + "?param=sh000001,day,2026-09-01,2026-09-07,5,", timeout=8, retries=1)),
+        ("eastmoney_kline", lambda b, c: P.http_get_text(
+            b + "?secid=1.600519&fields1=f1,f2&fields2=f51,f52,f53,f54,f55,f56"
+                "&klt=101&fqt=0&beg=20260901&end=20260907&lmt=5", timeout=8, retries=1)),
         ("sina_universe", lambda b, c: P.http_get_text(
             b + "?page=1&num=3&sort=symbol&asc=1&node=hs_a&symbol=&_s_r_a=init",
             timeout=8, retries=1)),
@@ -88,6 +97,9 @@ def diag():
         "bootstrap_done": svc.bootstrap_done,
         "universe_count": db.scalar("SELECT COUNT(*) FROM universe", (), 0) or 0,
         "provider": tests,
+        "provider_health": P.health(),
+        "chains": {"quote": P.chain_order("quote"), "kline": P.chain_order("kline"),
+                   "universe": P.chain_order("universe")},
         "recent_errors": errs,
     })
 

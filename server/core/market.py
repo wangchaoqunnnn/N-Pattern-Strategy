@@ -101,7 +101,7 @@ def _probe_b_shares(now: str) -> List[tuple]:
     sz_codes = [f"200{i:03d}" for i in range(2, 1000)]
     syms = [(c, "sh") for c in sh_codes] + [(c, "sz") for c in sz_codes]
     try:
-        quotes = P.sina_fetch_spot(syms)
+        quotes = P.fetch_spot_chain(syms)      # 多源行情(新浪/腾讯/东财), 任一只可用即可
     except Exception as e:  # noqa: BLE001
         log.warning("B股探测失败(已跳过): %s", e)
         return []
@@ -131,16 +131,29 @@ def sync_universe(max_items: int = 30000) -> Dict:
     """
     now = now_cn().strftime("%Y-%m-%d %H:%M:%S")
     rows: List[tuple] = []
-    try:
-        items = P.sina_fetch_all_universe(max_items)
-    except Exception as e:  # noqa: BLE001
-        log.warning("新浪股票列表抓取失败: %s", e)
-        items = []
-    sina_rows = []
-    for it in items:
-        r = _row_from_sina(it, now)
-        if r:
-            sina_rows.append(r)
+    # A股列表: 按 chains.universe 顺序多源尝试(新浪 → 东方财富)
+    sina_rows: List[tuple] = []
+    for name in P.chain_order("universe"):
+        try:
+            if name == "sina_universe":
+                items = P.sina_fetch_all_universe(max_items)
+                got = [r for r in (_row_from_sina(it, now) for it in items) if r]
+            elif name == "eastmoney_universe":
+                fs_a = P._prov("eastmoney_universe").get("fs_a_share") or ""
+                items = P.eastmoney_fetch_list(fs_a, max_pages=40)
+                got = [r for r in (_row_from_eastmoney(it, now) for it in items) if r]
+            else:
+                continue
+            if got:
+                P._mark(name, True)
+                P._sticky("universe", name)
+                sina_rows = got            # 记录首个成功的A股列表源
+                log.info("A股列表来源: %s (%s 只)", name, len(got))
+                break
+            P._mark(name, False, "empty")
+        except Exception as e:  # noqa: BLE001
+            P._mark(name, False, str(e))
+            log.warning("列表源 %s 失败: %s", name, e)
     rows.extend(sina_rows)
     # B股补充: 先试东方财富(含流通市值), 不可用则代码段探测
     b_added = 0
@@ -161,19 +174,6 @@ def sync_universe(max_items: int = 30000) -> Dict:
         probed = _probe_b_shares(now)
         rows.extend(probed)
         b_added = len(probed)
-    # A股兜底: 主源失败时用东方财富
-    if not sina_rows:
-        try:
-            p = P._prov("eastmoney_universe")
-            a_items = P.eastmoney_fetch_list(p.get("fs_a_share") or "", max_pages=40)
-            for it in a_items:
-                r = _row_from_eastmoney(it, now)
-                if r:
-                    rows.append(r)
-            if a_items:
-                log.info("已使用东方财富列表兜底: %s 条", len(a_items))
-        except Exception as e:  # noqa: BLE001
-            log.warning("A股列表兜底源亦不可用: %s", e)
     # 去重(后写覆盖)
     dedup = {r[0]: r for r in rows}
     final = list(dedup.values())
@@ -321,18 +321,9 @@ class MarketState:
             syms = [(c, self.symbols.get(c, symbol_of(c))[:2]) for c in codes]
         spot: Dict[str, dict] = {}
         try:
-            spot = P.sina_fetch_spot(syms)
+            spot = P.fetch_spot_chain(syms)
         except Exception as e:  # noqa: BLE001
-            log.warning("新浪行情不可用: %s", e)
-        missing = [(c, m) for c, m in syms if c not in spot]
-        if missing:
-            try:
-                extra = P.tencent_fetch_spot(missing)
-                if extra:
-                    spot.update(extra)
-                    log.info("新浪行情缺失 %s 只, 已用腾讯行情补齐 %s 只", len(missing), len(extra))
-            except Exception as e:  # noqa: BLE001
-                log.warning("腾讯行情补齐失败: %s", e)
+            log.warning("行情多源抓取异常: %s", e)
         now = now_cn().strftime("%Y-%m-%d %H:%M:%S")
         # 清理历史遗留的带前缀键(兼容旧版存储)
         if codes is None:
