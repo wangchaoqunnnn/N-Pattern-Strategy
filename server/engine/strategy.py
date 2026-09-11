@@ -38,7 +38,7 @@ def default_params_v1() -> dict:
                  "cooldown_days": 10},
         "misc": {"min_listed_bars": 60, "rsi_window": 14,
                  "ma20_slope_min_stock": 0.0, "require_close_above_ma20": True},
-        "screen": {"boards": ["沪主板", "深主板", "科创板", "创业板"],
+        "screen": {"boards": ["沪主板", "深主板", "科创板", "创业板", "北交所", "沪B", "深B"],
                    "min_price": 2.0, "max_price": 1000.0},
     }
 
@@ -57,6 +57,7 @@ def readable_rules(params: dict) -> str:
                  f"{e.get('ma20_slope_min', 0.05)}%为『正常』; 环境闸门开启={e.get('use_gate')}"
                  f"(开启时主跌期暂停开新仓; half_mode={e.get('half_mode')} 时震荡期减半仓位)。")
     lines.append("【二、选股(点火阳线)】")
+    lines.append(f"  覆盖范围(全部交易所, 无遗漏): {', '.join((params.get('screen') or {}).get('boards') or [])}")
     lines.append(f"  排除ST/退市/次新(上市<{m.get('min_listed_bars', 60)}根K线); 价格区间"
                  f"[{params.get('screen', {}).get('min_price')},{params.get('screen', {}).get('max_price')}]元。")
     lines.append(f"  近10个交易日内出现涨幅≥{i.get('min_pct')}%的光头大阳线/涨停, "

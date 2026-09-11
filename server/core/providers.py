@@ -84,12 +84,36 @@ def sina_fetch_all_universe(max_items: int = 20000) -> List[dict]:
             return []
 
     result: List[dict] = list(first)
-    with ThreadPoolExecutor(max_workers=6) as ex:
+    with ThreadPoolExecutor(max_workers=4) as ex:      # 并发适中, 降低被限流概率
         for chunk in ex.map(fetch, pages):
             result.extend(chunk)
             if len(chunk) < page_size:
                 break
     return result
+
+
+# ================= 东方财富: 列表接口(可选补充源: B股/兜底) =================
+def eastmoney_fetch_list(fs: str, max_pages: int = 30, page_size: int = 200) -> List[dict]:
+    """按 fs 条件分页抓取代码列表。返回 [{f12代码,f14名称,f2价格,f20总市值,f21流通市值}]。
+    源地址与公共参数来自 providers.json; 不可达时抛异常由调用方跳过。"""
+    p = _prov("eastmoney_universe")
+    base = p.get("base", "")
+    common = dict(p.get("params") or {})
+    out: List[dict] = []
+    for pn in range(1, max_pages + 1):
+        q = {**common, "pn": pn, "pz": page_size, "fs": fs}
+        url = base + "?" + urllib.parse.urlencode(q)
+        txt = http_get_text(url, headers=p.get("headers") or {}, timeout=15, retries=2)
+        data = json.loads(txt)
+        diff = (data.get("data") or {}).get("diff") or []
+        if isinstance(diff, dict):
+            diff = list(diff.values())
+        if not diff:
+            break
+        out.extend(diff)
+        if len(diff) < page_size:
+            break
+    return out
 
 
 # ================= 新浪: 批量实时行情(全市场/指定集) =================
@@ -155,13 +179,13 @@ def _f(x) -> float:
 
 
 # ================= 腾讯: 日K线(不复权 day / 前复权 qfqday) =================
-def _tencent_kline_raw(symbol: str, start: str, end: str, count: int = 800,
+def _tencent_kline_raw(prov_name: str, symbol: str, start: str, end: str, count: int = 800,
                        fq: str = "") -> Optional[List[List]]:
-    p = _prov("tencent_kline")
+    p = _prov(prov_name)
     base = p.get("base", "")
     param = f"{symbol},day,{start},{end},{count},{fq}"
     url = base + "?" + urllib.parse.urlencode({"param": param})
-    txt = http_get_text(url, timeout=15, retries=3)
+    txt = http_get_text(url, timeout=15, retries=2)
     data = json.loads(txt)
     d = ((data.get("data") or {}).get(symbol) or {})
     rows = d.get("qfqday") if fq else d.get("day")
@@ -170,41 +194,50 @@ def _tencent_kline_raw(symbol: str, start: str, end: str, count: int = 800,
 
 def fetch_kline(symbol: str, start: str, end: str, count: int = 800,
                 fq: str = "", is_index: bool = False) -> List[dict]:
-    """返回 [{'date','open','high','low','close','vol_shares'}]。symbol 形如 sh600519。
-    优先腾讯; 失败(尤其北交所bj)回退新浪K线接口。"""
-    try:
-        rows = _tencent_kline_raw(symbol, start, end, count, fq)
-        out = []
-        for r in rows or []:
-            if len(r) < 6:
-                continue
-            try:
-                vol_hand = float(r[5])
-            except Exception:
-                vol_hand = 0.0
-            out.append({"date": r[0], "open": _f(r[1]), "close": _f(r[2]),
-                        "high": _f(r[3]), "low": _f(r[4]),
-                        "vol_shares": vol_hand * 100.0 if not is_index else vol_hand})
-        if out:
-            return out
-    except Exception as e:  # noqa: BLE001
-        log.warning("腾讯K线失败 %s: %s", symbol, e)
+    """返回 [{'date','open','high','low','close','vol_shares'}]。
+    symbol 形如 sh600519 / sz000001 / bj920000。
+    链路: 腾讯proxy主源 → 腾讯web备源 → 新浪money回退(均支持北交所)。"""
+    for prov_name in ("tencent_kline", "tencent_kline_alt"):
+        try:
+            rows = _tencent_kline_raw(prov_name, symbol, start, end, count, fq)
+            out = []
+            for r in rows or []:
+                if len(r) < 6:
+                    continue
+                try:
+                    vol_hand = float(r[5])
+                except Exception:
+                    vol_hand = 0.0
+                out.append({"date": r[0], "open": _f(r[1]), "close": _f(r[2]),
+                            "high": _f(r[3]), "low": _f(r[4]),
+                            "vol_shares": vol_hand * 100.0 if not is_index else vol_hand})
+            if out:
+                return out
+        except Exception as e:  # noqa: BLE001
+            log.warning("腾讯K线(%s)失败 %s: %s", prov_name, symbol, e)
     return _sina_kline_fallback(symbol, count)
 
 
 def _sina_kline_fallback(symbol: str, count: int) -> List[dict]:
-    """新浪K线(scale=240 日线), 返回OHLCV, volume单位=股。地址取自 providers.json。"""
+    """新浪 money 域名日K(scale=240): JSON数组[{day,open,high,low,close,volume}],
+    volume单位=股, 支持北交所(bj)。地址与请求头取自 providers.json。"""
     p = _prov("sina_kline")
     base = p.get("base", "")
+    headers = p.get("headers") or {}
+    n = min(max(int(count or 300), 60), 450)      # 取近段, 控制数据量
     url = base + "?" + urllib.parse.urlencode(
-        {"symbol": symbol, "scale": 240, "ma": "no", "datalen": count})
+        {"symbol": symbol, "scale": 240, "ma": "no", "datalen": n})
     try:
-        txt = http_get_text(url, timeout=15, retries=2)
+        txt = http_get_text(url, headers=headers, timeout=15, retries=2)
         s = txt[txt.find("["): txt.rfind("]") + 1]
+        if not s:
+            return []
         arr = json.loads(s)
         out = []
         for r in arr:
-            out.append({"date": r.get("day", ""), "open": _f(r.get("open")),
+            if not isinstance(r, dict):
+                continue
+            out.append({"date": str(r.get("day", ""))[:10], "open": _f(r.get("open")),
                         "close": _f(r.get("close")), "high": _f(r.get("high")),
                         "low": _f(r.get("low")),
                         "vol_shares": _f(r.get("volume"))})

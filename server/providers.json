@@ -12,16 +12,29 @@
       "note": "新浪沪深京A股全量列表(分页JSON)"
     },
     "tencent_kline": {
+      "base": "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get",
+      "note": "腾讯日K(主源, 无WAF, 沪深/指数/北交所通用), 支持不复权day/前复权qfq"
+    },
+    "tencent_kline_alt": {
       "base": "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
-      "note": "腾讯日K(支持不复权day/前复权qfq), 同时返回最新快照qt"
+      "note": "腾讯日K备源(对北交所bj代码会返回WAF页, 仅作回退)"
     },
     "tencent_quote": {
       "base": "https://qt.gtimg.cn/q=",
       "note": "腾讯行情(备用, 单次数量少)"
     },
     "sina_kline": {
-      "base": "https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20_=/CN_MarketDataService.getKLineData",
-      "note": "新浪日K回退源(腾讯K线失败时使用), scale=240"
+      "base": "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData",
+      "headers": {"Referer": "https://finance.sina.com.cn"},
+      "note": "新浪日K最终回退源(支持北交所), scale=240, 返回最近N根JSON数组"
+    },
+    "eastmoney_universe": {
+      "base": "https://push2.eastmoney.com/api/qt/clist/get",
+      "note": "东方财富列表接口(可选补充源): 用于纳入B股(沪B/深B)以及在A股列表源不可用时兜底; 服务器不可达时自动跳过",
+      "params": {"po": 1, "np": 1, "fltt": 2, "invt": 2, "fid": "f12",
+                 "fields": "f12,f14,f2,f20,f21"},
+      "fs_b_share": "m:0+b:2,m:1+b:2",
+      "fs_a_share": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048"
     },
     "index_codes": {
       "sh000300": "沪深300",

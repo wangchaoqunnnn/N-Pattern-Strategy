@@ -64,6 +64,9 @@ class Service:
             n = mk.sync_universe()
             if (n.get("count") or 0) > 0:
                 self.loaded_universe = True
+                # 刷新代码->市场前缀映射(北交所bj等), 供行情/日K抓取使用
+                mk.market.symbols = {r["code"]: (r.get("symbol") or mk.symbol_of(r["code"]))
+                                     for r in mk.universe_list()}
                 db.log_event("INFO", "股票列表就绪")
                 return True
         except Exception as e:  # noqa: BLE001
@@ -123,6 +126,16 @@ class Service:
         n = db.scalar("SELECT COUNT(*) FROM daily_bars WHERE code NOT LIKE 's%'", (), 0) or 0
         if not n:
             return True
+        # 覆盖度: 监控范围内的股票(含北交所/B股)是否都有K线缓存
+        boards = mk.SCREEN_BOARDS
+        ph = ",".join("?" * len(boards))
+        missing = db.scalar(
+            f"SELECT COUNT(*) FROM universe u WHERE u.board IN ({ph}) "
+            f"AND NOT EXISTS (SELECT 1 FROM daily_bars b WHERE b.code=u.code)",
+            tuple(boards)) or 0
+        if missing > 30:
+            log.info("K线覆盖不足: 监控范围内仍有 %s 只无缓存, 触发同步", missing)
+            return True
         latest = db.scalar("SELECT MAX(date) FROM daily_bars WHERE date LIKE '20%'", (), None)
         idx = mk.market.index_bars.get("sh000300") or []
         last_td = idx[-1]["date"] if idx else ""
@@ -139,19 +152,22 @@ class Service:
                 uni = mk.auto_screen_candidates()
                 codes = [u["code"] for u in uni]
                 days = int(self.cfg.get("history_calendar_days", 320))
-                start = (now_cn().date().replace(
-                    year=now_cn().date().year)).toordinal()  # noqa
                 from datetime import timedelta
                 start_d = (now_cn().date() - timedelta(days=days)).strftime("%Y-%m-%d")
-                end_d = now_cn().strftime("%Y-%m-%d")
+                # 同步截止日 = 最近一个"已收盘"交易日: 盘中用指数最新日期, 避免把当日未完成K线当缺失反复全量拉取
+                idx = mk.market.index_bars.get("sh000300") or []
+                idx_last = idx[-1]["date"] if idx else ""
+                today = now_cn().strftime("%Y-%m-%d")
+                end_d = today if (not idx_last or idx_last >= today) else idx_last
                 db.meta_set("sync_progress", {"total": len(codes), "done": 0,
-                                              "updated": now_str(), "running": True})
+                                              "updated": now_str(), "running": True,
+                                              "end": end_d})
                 mk.sync_history(codes, start_d, end_d, fq="",
                                 workers=int(self.cfg.get("sync_workers", 10)),
                                 progress_key="sync_progress")
                 mk.market.load_from_db()
                 db.meta_set("last_history_sync", now_str())
-                db.log_event("INFO", "历史K线增量同步完成")
+                db.log_event("INFO", f"历史K线增量同步完成(截止{end_d}, 覆盖 {len(codes)} 只含北交所/B股)")
             except Exception as e:  # noqa: BLE001
                 log.exception("历史同步任务异常: %s", e)
             finally:
@@ -326,7 +342,11 @@ class Service:
         monthly = {"ok": True, "trigger": False, "reason": "非月末"}
         if self._is_month_end(date):
             monthly = optimizer.monthly_optimize(date[:7])
-        # 5 增量历史同步(后台)
+        # 5 刷新指数(含当日) → 增量同步历史K线(含北交所/B股), 后台执行
+        try:
+            mk.market.refresh_index()
+        except Exception as e:  # noqa: BLE001
+            log.warning("收盘指数刷新失败: %s", e)
         if not self.sync_running:
             self._start_history_sync()
         db.meta_set("last_close_pass", date)
@@ -350,6 +370,11 @@ class Service:
         try:
             mk.sync_universe()
             mk.market.refresh_index()
+            mk.market.symbols = {r["code"]: (r.get("symbol") or mk.symbol_of(r["code"]))
+                                 for r in mk.universe_list()}
+            # 监控范围(含北交所/B股)若仍有股票无K线缓存 → 自动补齐
+            if self._need_history_sync() and not self.sync_running:
+                self._start_history_sync()
         except Exception as e:  # noqa: BLE001
             log.warning("每日维护失败: %s", e)
 

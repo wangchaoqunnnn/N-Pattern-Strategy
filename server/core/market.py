@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """市场数据管理: 股票列表(universe)、板块分类、K线缓存(SQLite + 内存)、实时行情、指数环境。
 
-- 全市场扫描范围: 沪深主板/科创板/创业板(可选北交所), 默认剔除ST/退市与B股。
+- 全市场扫描范围: 沪主板/深主板/科创板/创业板/北交所/沪B/深B(全部交易所), 仅剔除ST/退市与无法归类代码。
 - 股票代码: 6位数字; 日K持久化于 SQLite(daily_bars), 启动加载近段到内存用于盘中高频筛选。
 """
 from __future__ import annotations
@@ -17,14 +17,14 @@ log = get_logger("market")
 
 INDEX_SYMBOLS = ["sh000300", "sh000001"]  # 沪深300 / 上证指数(默认源providers.json可改)
 
-# 板块名 -> 是否纳入自动筛选(默认含沪深主板/科创/创业)
-SCREEN_BOARDS = ["沪主板", "深主板", "科创板", "创业板"]
+# 自动筛选范围: 覆盖全部交易所/板块
+SCREEN_BOARDS = ["沪主板", "深主板", "科创板", "创业板", "北交所", "沪B", "深B"]
 
 
 def classify(code: str, prefix: str = "") -> str:
     """按代码段归类板块。"""
     c = clean_code(code)
-    if prefix == "bj" or c.startswith(("4", "8", "92")):
+    if prefix == "bj" or c.startswith(("43", "83", "87", "88", "92", "4", "8")):
         return "北交所"
     if c.startswith("60"):
         return "沪主板"
@@ -46,11 +46,16 @@ def classify(code: str, prefix: str = "") -> str:
 
 
 def symbol_of(code: str) -> str:
+    """代码 -> 带市场前缀的行情符号(sh/sz/bj)。
+    优先用股票列表里的真实前缀(内存缓存, 避免逐股查库), 否则按代码段启发判断。"""
     c = clean_code(code)
-    if c.startswith(("6", "9", "5")):      # 沪: 6股票 9B股 5基金等
-        return "sh" + c
-    if c.startswith(("4", "8", "92")):     # 北交所
+    known = market.symbols.get(c) if market.symbols else ""
+    if known:
+        return known
+    if c.startswith(("43", "83", "87", "88", "92", "4", "8")):   # 北交所: 430/83x/87x/88x/920等
         return "bj" + c
+    if c.startswith(("6", "9", "5")):                            # 沪市: 6股票/900B股/5基金
+        return "sh" + c
     return "sz" + c
 
 
@@ -59,33 +64,101 @@ def market_prefix(code: str) -> str:
 
 
 # ------------------------------------------------------------------ universe
+def _row_from_sina(it: dict, now: str):
+    """新浪列表项 -> universe 行。"""
+    sym = str(it.get("symbol", ""))
+    prefix = sym[:2]
+    code = clean_code(sym)
+    name = str(it.get("name", "")).strip()
+    if not code or not name:
+        return None
+    board = classify(code, prefix)
+    price_eff = num(it.get("trade")) or num(it.get("settlement")) or 0.0
+    nmc = num(it.get("nmc"))                      # 万元
+    float_shares = (nmc * 10000.0 / price_eff) if (price_eff > 0 and nmc > 0) else 0.0
+    return (code, sym or symbol_of(code), name, board,
+            float_shares if float_shares > 0 else 0.0, now)
+
+
+def _row_from_eastmoney(it: dict, now: str):
+    """东方财富列表项 -> universe 行(f12代码,f14名称,f2价格,f21流通市值[元])。"""
+    code = clean_code(it.get("f12"))
+    name = str(it.get("f14") or "").strip()
+    if not code or not name:
+        return None
+    price = num(it.get("f2"))
+    nmc = num(it.get("f21"))                      # 流通市值(元)
+    float_shares = (nmc / price) if (price > 0 and nmc > 0) else 0.0
+    board = classify(code)
+    return (code, symbol_of(code), name, board,
+            float_shares if float_shares > 0 else 0.0, now)
+
+
 def sync_universe(max_items: int = 30000) -> Dict:
-    """全市场列表同步(新浪 getHQNodeData), 估算流通股本, 写入 universe 表。"""
-    items = P.sina_fetch_all_universe(max_items)
+    """全市场股票列表同步。
+
+    覆盖全部交易所与板块:
+      1) 新浪 沪深京A股列表(主源) —— 沪主板/深主板/科创板/创业板/北交所;
+      2) 东方财富列表(可选补充源) —— 沪B/深B 等新浪未覆盖的品种;
+      3) 若主源不可用, 自动用东方财富A股列表兜底。
+    """
     now = now_cn().strftime("%Y-%m-%d %H:%M:%S")
-    rows = []
+    rows: List[tuple] = []
+    try:
+        items = P.sina_fetch_all_universe(max_items)
+    except Exception as e:  # noqa: BLE001
+        log.warning("新浪股票列表抓取失败: %s", e)
+        items = []
     for it in items:
-        sym = str(it.get("symbol", ""))
-        prefix = sym[:2]
-        code = clean_code(sym)
-        name = str(it.get("name", "")).strip()
-        if not code or not name:
-            continue
-        board = classify(code, prefix)
-        price_eff = num(it.get("trade")) or num(it.get("settlement")) or 0.0
-        nmc = num(it.get("nmc"))                      # 万元
-        float_shares = 0.0
-        if price_eff > 0 and nmc > 0:
-            float_shares = nmc * 10000.0 / price_eff   # 元 / 元每股 -> 股
-        rows.append((code, sym, name, board, float_shares if float_shares > 0 else 0.0, now))
-    if rows:
-        db.executemany(
-            "INSERT INTO universe(code,symbol,name,board,float_shares,updated_at) "
-            "VALUES(?,?,?,?,?,?) ON CONFLICT(code) DO UPDATE SET "
-            "symbol=excluded.symbol,name=excluded.name,board=excluded.board,"
-            "float_shares=excluded.float_shares,updated_at=excluded.updated_at", rows)
-    log.info("universe 同步完成: %s 只", len(rows))
-    return {"count": len(rows)}
+        r = _row_from_sina(it, now)
+        if r:
+            rows.append(r)
+    # B股补充(沪B/深B) —— 东方财富可达时纳入, 不可达则跳过
+    try:
+        p = P._prov("eastmoney_universe")
+        fs_b = p.get("fs_b_share") or ""
+        if fs_b:
+            b_items = P.eastmoney_fetch_list(fs_b, max_pages=3)
+            added = 0
+            for it in b_items:
+                r = _row_from_eastmoney(it, now)
+                if r:
+                    rows.append(r)
+                    added += 1
+            if added:
+                log.info("B股补充完成: %s 只(沪B/深B)", added)
+    except Exception as e:  # noqa: BLE001
+        log.info("B股补充源不可用(已跳过, 不影响A股全覆盖): %s", e)
+    # A股兜底: 主源失败时用东方财富
+    if not rows:
+        try:
+            p = P._prov("eastmoney_universe")
+            a_items = P.eastmoney_fetch_list(p.get("fs_a_share") or "", max_pages=40)
+            for it in a_items:
+                r = _row_from_eastmoney(it, now)
+                if r:
+                    rows.append(r)
+            if rows:
+                log.info("已使用东方财富列表兜底: %s 只", len(rows))
+        except Exception as e:  # noqa: BLE001
+            log.warning("A股列表兜底源亦不可用: %s", e)
+    # 去重(后写覆盖)
+    dedup = {r[0]: r for r in rows}
+    final = list(dedup.values())
+    if not final:
+        existing = db.scalar("SELECT COUNT(*) FROM universe", (), 0) or 0
+        if existing > 0:
+            log.warning("股票列表源暂不可用(可能被限流), 保留现有 %s 只列表继续运行", existing)
+            return {"count": existing, "cached": True}
+        log.error("股票列表抓取失败且本地无缓存, 请检查数据源连通性(/api/diag)")
+        return {"count": 0, "cached": False}
+    db.executemany(
+        "INSERT INTO universe(code,symbol,name,board,float_shares,updated_at) "
+        "VALUES(?,?,?,?,?,?) ON CONFLICT(code) DO UPDATE SET "
+        "symbol=excluded.symbol,name=excluded.name,board=excluded.board,"
+        "float_shares=excluded.float_shares,updated_at=excluded.updated_at", final)
+    log.info("universe 同步完成: %s 只(含北交所/B股等全部交易所)", len(final))
+    return {"count": len(final)}
 
 
 def universe_list() -> List[dict]:
@@ -122,6 +195,7 @@ class MarketState:
         self.quotes: Dict[str, dict] = {}
         self.quotes_ts: str = ""
         self.universe_name: Dict[str, str] = {}
+        self.symbols: Dict[str, str] = {}      # code -> sh/sz/bj 前缀(来自股票列表)
         self.loaded = False
 
     # ---------- 内存加载 ----------
@@ -146,11 +220,12 @@ class MarketState:
         with self.lock:
             self.bars = bars
             self.index_bars = idx
-            self.universe_name = {r["code"]: r["name"]
-                                  for r in db.rows("SELECT code,name FROM universe")}
+            uni = db.rows("SELECT code,name,symbol FROM universe")
+            self.universe_name = {r["code"]: r["name"] for r in uni}
+            self.symbols = {r["code"]: (r.get("symbol") or symbol_of(r["code"])) for r in uni}
         self.loaded = True
-        log.info("内存K线加载完成: 股票 %s 只, 符号类(指数) %s 组",
-                 len(bars), {k: len(v) for k, v in idx.items()})
+        log.info("内存K线加载完成: 股票 %s 只, 符号类(指数) %s 组, 股票列表 %s 只(含北交所/B股)",
+                 len(bars), {k: len(v) for k, v in idx.items()}, len(self.symbols))
 
     # ---------- 序列访问 ----------
     def series(self, code: str, max_len: int = 260) -> Optional[dict]:
@@ -200,12 +275,13 @@ class MarketState:
 
     # ---------- 实时行情 ----------
     def refresh_spot(self, codes: Optional[List[str]] = None) -> Dict[str, dict]:
-        """抓取实时行情(新浪批量). codes=None 时取全市场(universe)。
+        """抓取实时行情(新浪批量). codes=None 时取全市场(universe, 含北交所/B股)。
         采用"合并更新": 抓取失败的代码保留上一次快照, 避免瞬时失败清空内存行情。"""
         if codes is None:
-            uni = universe_list()
-            codes = [r["code"] for r in uni]
-        syms = [(c, market_prefix(c)) for c in codes]
+            syms = [(r["code"], (r.get("symbol") or symbol_of(r["code"]))[:2])
+                    for r in universe_list()]
+        else:
+            syms = [(c, self.symbols.get(c, symbol_of(c))[:2]) for c in codes]
         spot = P.sina_fetch_spot(syms)
         now = now_cn().strftime("%Y-%m-%d %H:%M:%S")
         # 清理历史遗留的带前缀键(兼容旧版存储)
@@ -373,15 +449,14 @@ def _finalize_rows(code: str, rows: List[dict]) -> List[dict]:
 
 
 def auto_screen_candidates() -> List[dict]:
-    """返回参与自动筛选的股票(code,name,board): 主板/科创/创业 且非ST/退。"""
+    """返回参与自动筛选的股票(code,name,board): 沪主板/深主板/科创板/创业板/北交所/沪B/深B,
+    仅剔除 ST/退市 与无法归类的代码 —— 覆盖所有交易所, 不做板块遗漏。"""
     uni = universe_list()
     out = []
     for r in uni:
         name = r.get("name") or ""
         board = r.get("board") or classify(r["code"])
         if is_st_name(name):
-            continue
-        if board in ("沪B", "深B", "其他"):
             continue
         if board not in SCREEN_BOARDS:
             continue
